@@ -1,0 +1,52 @@
+name: Deploy para AWS
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      ECR_REPO_FRONT: ${{ secrets.ECR_REPO_FRONT }}
+      ECR_REPO_BACK: ${{ secrets.ECR_REPO_BACK }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Login no ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Set envs por branch
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            echo "ECS_CLUSTER=prod-cluster" >> $GITHUB_ENV
+            echo "ECS_SERVICE=prod-service" >> $GITHUB_ENV
+            echo "ECS_TASK_DEFINITION=ecs-task-def-prod.json" >> $GITHUB_ENV
+          else
+            echo "ECS_CLUSTER=staging-cluster" >> $GITHUB_ENV
+            echo "ECS_SERVICE=staging-service" >> $GITHUB_ENV
+            echo "ECS_TASK_DEFINITION=ecs-task-def-staging.json" >> $GITHUB_ENV
+          fi
+
+      - name: Buildar e pushar imagens
+        run: |
+          docker build -t $ECR_REPO_FRONT ./frontend
+          docker build -t $ECR_REPO_BACK ./backend
+          docker push $ECR_REPO_FRONT
+          docker push $ECR_REPO_BACK
+
+      - name: Atualizar ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
